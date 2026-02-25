@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Safro Fitness - Видеотренировки с ИИ</title>
+    <link rel="stylesheet" href="css/main.css" />
+    <link rel="stylesheet" href="css/landing.css" />
+    <link rel="stylesheet" href="css/room.css" />
+  </head>
+  <body>
+    <div class="container">
+      <!-- СТРАНИЦА ВХОДА -->
+      <div id="landingPage" class="landing-page">
+        <div class="landing-header">
+          <div class="logo"><span>💪</span> Safro Fitness</div>
+          <button class="theme-toggle" id="themeToggle">🌓</button>
+        </div>
+
+        <div class="landing-content">
+          <div class="auth-card">
+            <h2>Добро пожаловать!</h2>
+
+            <div class="input-group">
+              <label>Ваше имя</label>
+              <input type="text" id="userName" placeholder="Введите ваше имя" />
+            </div>
+
+            <button class="btn btn-primary" id="createRoomBtn">Создать новую комнату</button>
+
+            <div class="divider">или</div>
+
+            <div class="input-group">
+              <label>ID комнаты</label>
+              <input type="text" id="roomIdInput" placeholder="Введите ID комнаты" />
+              <div class="error-message" id="roomError">Комната не найдена</div>
+            </div>
+
+            <button class="btn btn-secondary" id="joinRoomBtn">Присоединиться</button>
+
+            <div class="version">Версия 1.0.0 | О проекте</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- СТРАНИЦА КОМНАТЫ -->
+      <div id="roomPage" class="room-page">
+        <!-- Верхняя панель -->
+        <div class="room-header">
+          <div class="room-info">
+            <div class="room-id">
+              <span id="displayRoomId">room-123</span>
+              <span class="copy-icon" id="copyRoomId">📋</span>
+            </div>
+            <div class="participants-count" id="toggleParticipants">
+              <span>👥</span>
+              <span id="participantsCount">1</span>
+              <span>участников</span>
+            </div>
+            <div class="timer" id="timer">00:00</div>
+          </div>
+          <button class="exit-btn" id="exitRoomBtn"><span>🚪</span> Выйти</button>
+        </div>
+
+        <!-- Основная область с видео -->
+        <div class="video-area" id="videoArea">
+          <!-- Динамически заполняется через JS -->
+        </div>
+
+        <!-- Нижняя панель управления -->
+        <div class="control-bar">
+          <button class="control-btn" id="toggleMic" title="Микрофон">
+            <span>🎤</span>
+            <span class="tooltip">Отключить микрофон</span>
+          </button>
+          <button class="control-btn" id="toggleCam" title="Камера">
+            <span>🎥</span>
+            <span class="tooltip">Отключить камеру</span>
+          </button>
+          <button class="control-btn" id="shareScreen" title="Демонстрация">
+            <span>🖥️</span>
+            <span class="tooltip">Поделиться экраном</span>
+          </button>
+          <button class="control-btn" id="toggleParticipantsBtn" title="Участники">
+            <span>👥</span>
+            <span class="tooltip">Список участников</span>
+          </button>
+          <button class="control-btn" id="chatBtn" title="Чат">
+            <span>💬</span>
+            <span class="badge" id="chatBadge" style="display: none">1</span>
+            <span class="tooltip">Открыть чат</span>
+          </button>
+          <button class="control-btn" id="settingsBtn" title="Настройки">
+            <span>⚙️</span>
+            <span class="tooltip">Настройки</span>
+          </button>
+          <button class="control-btn" id="aiBtn" title="ИИ-анализ">
+            <span>🤖</span>
+            <span class="tooltip">Запустить анализ движений</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Боковая панель участников -->
+    <div class="participants-panel" id="participantsPanel">
+      <div class="panel-header">
+        <h3>Участники <span id="panelParticipantsCount">(1)</span></h3>
+        <button class="close-panel" id="closePanel">×</button>
+      </div>
+      <ul class="participants-list" id="participantsList">
+        <!-- Динамически заполняется -->
+      </ul>
+    </div>
+
+    <!-- Модальное окно подтверждения -->
+    <div class="modal" id="confirmModal">
+      <div class="modal-content">
+        <h3>Подтверждение</h3>
+        <p id="modalMessage">Вы уверены, что хотите покинуть комнату?</p>
+        <div class="modal-buttons">
+          <button class="btn btn-secondary" id="modalCancel">Отмена</button>
+          <button class="btn btn-danger" id="modalConfirm">Подтвердить</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модальное окно разрешений -->
+    <div class="modal" id="permissionModal">
+      <div class="modal-content">
+        <h3>🎥 Доступ к устройствам</h3>
+        <p>Хотите поделиться видео и звуком?</p>
+        <div class="modal-buttons">
+          <button class="btn btn-secondary" id="permissionDeny">Отказать</button>
+          <button class="btn btn-primary" id="permissionAllow">Разрешить</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Уведомление (тост) -->
+    <div class="toast" id="toast">ID скопирован</div>
+    <!-- Скрытый элемент для хранения peerId -->
+    <div style="display: none" id="myPeerId"></div>
+    <!-- Скрипты -->
+    <script src="js/utils.js"></script>
+    <script src="js/webrtc.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/main.js"></script>
+  </body>
+</html>

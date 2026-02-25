@@ -1,17 +1,22 @@
-# Зависимости
-node_modules/
-venv/
+# Python
 __pycache__/
 *.pyc
+venv/
+env/
+*.log
 
-# Файлы окружения
-.env
-.env.local
+# Node
+node_modules/
+package-lock.json
 
-# IDE
+# VS Code
 .vscode/
-.idea/
+*.code-workspace
 
-# Системные файлы
+# OS
 .DS_Store
 Thumbs.db
+
+# Project specific
+backend/venv/
+frontend/node_modules/
