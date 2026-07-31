@@ -12,6 +12,7 @@ const WebRTC = {
   isMicOn: false,
   isScreenSharing: false,
   userName: '',
+  hasJoinedRoom: false, // Флаг, что уже присоединились к комнате
 
   // Конфигурация ICE серверов
   configuration: {
@@ -55,7 +56,7 @@ const WebRTC = {
 
   // Обработка сообщений от сервера
   async handleMessage(message) {
-    console.log('📨 WebRTC: Получено:', message.type);
+    console.log('📨 WebRTC: Получено:', message.type, message.sourcePeerId || '');
 
     switch (message.type) {
       case 'connected':
@@ -65,32 +66,35 @@ const WebRTC = {
 
       case 'joined-room':
         this.currentRoom = message.roomId;
+        this.hasJoinedRoom = true;
 
         // Первый участник в комнате - тренер
         const isTrainer = message.peers.length === 1;
         UI.addParticipant(this.peerId, this.userName, isTrainer);
 
-        // Создаем соединения с другими участниками
+        // Добавляем существующих участников
         for (const otherPeerId of message.peers) {
           if (otherPeerId !== this.peerId) {
-            await this.createPeerConnection(otherPeerId, true);
             UI.addParticipant(otherPeerId, `Участник ${otherPeerId.slice(0, 4)}`, false);
+            // Создаем соединение КАК ТОЛЬКО получаем список участников
+            await this.createPeerConnection(otherPeerId, true);
           }
         }
         break;
 
       case 'peer-joined':
         console.log('👤 WebRTC: Новый участник:', message.peerId);
+        // Используем имя из сообщения, если оно есть
+        const userName = message.userName || `Участник ${message.peerId.slice(0, 4)}`;
+        UI.addParticipant(message.peerId, userName, false);
         await this.createPeerConnection(message.peerId, true);
-        // Новый участник никогда не может быть тренером (тренер уже есть)
-        UI.addParticipant(message.peerId, `Участник ${message.peerId.slice(0, 4)}`, false);
         break;
 
       case 'peer-left':
         console.log('👤 WebRTC: Участник ушел:', message.peerId);
         this.removePeerConnection(message.peerId);
-        UI.removeParticipant(message.peerId);
-        UI.removeVideoStream(message.peerId);
+        UI.removeParticipant(message.peerId); // Это уже есть
+        UI.removeVideoStream(message.peerId); // Это уже есть
         break;
 
       case 'offer':
@@ -100,7 +104,16 @@ const WebRTC = {
       case 'answer':
         await this.handleAnswer(message);
         break;
-
+      case 'mic-state':
+        console.log(
+          '🎤 Смена состояния микрофона у',
+          message.sourcePeerId,
+          'muted:',
+          message.isMuted,
+        );
+        UI.updateParticipantStatus(message.sourcePeerId, { audio: !message.isMuted });
+        UI.updateAudioIndicator(message.sourcePeerId, message.isMuted);
+        break;
       case 'ice-candidate':
         await this.handleIceCandidate(message);
         break;
@@ -132,10 +145,11 @@ const WebRTC = {
   // Создание peer connection
   async createPeerConnection(targetPeerId, isCaller = false) {
     if (this.peerConnections[targetPeerId]) {
+      console.log('Соединение уже существует с', targetPeerId);
       return this.peerConnections[targetPeerId];
     }
 
-    console.log(`🔌 WebRTC: Создаем соединение с ${targetPeerId}`);
+    console.log(`🔌 WebRTC: Создаем соединение с ${targetPeerId}, isCaller: ${isCaller}`);
 
     const pc = new RTCPeerConnection(this.configuration);
     this.peerConnections[targetPeerId] = pc;
@@ -144,16 +158,19 @@ const WebRTC = {
       this.pendingCandidates[targetPeerId] = [];
     }
 
-    // Добавляем локальные треки
+    // Добавляем локальные треки, если камера уже включена
     if (this.localStream && this.isCameraOn) {
+      console.log('📹 Добавляем локальные треки в соединение с', targetPeerId);
       this.localStream.getTracks().forEach((track) => {
         pc.addTrack(track, this.localStream);
+        console.log('  - Добавлен трек:', track.kind);
       });
     }
 
     // Обработка ICE кандидатов
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log(`❄️ Отправляем ICE кандидат для ${targetPeerId}`);
         this.socket.send(
           JSON.stringify({
             type: 'ice-candidate',
@@ -166,9 +183,28 @@ const WebRTC = {
 
     // Получение удаленного потока
     pc.ontrack = (event) => {
-      console.log(`📹 WebRTC: Получен трек от ${targetPeerId}`);
+      console.log(`📹 ПОЛУЧЕН ТРЕК от ${targetPeerId}:`, event.track.kind);
       const stream = event.streams[0];
-      UI.addVideoStream(targetPeerId, stream, false, `Участник ${targetPeerId.slice(0, 4)}`);
+
+      // Добавляем видео в UI
+      const existingVideo = document.getElementById(`video-${targetPeerId}`);
+      if (!existingVideo) {
+        UI.addVideoStream(targetPeerId, stream, false, `Участник ${targetPeerId.slice(0, 4)}`);
+      } else {
+        console.log('⚠️ Видео уже существует для', targetPeerId);
+      }
+    };
+
+    // Обработка состояния ICE
+    pc.oniceconnectionstatechange = () => {
+      console.log(`🧊 ICE состояние с ${targetPeerId}:`, pc.iceConnectionState);
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log(`📊 Состояние соединения с ${targetPeerId}:`, pc.connectionState);
+      if (pc.connectionState === 'connected') {
+        console.log('✅ СОЕДИНЕНИЕ УСТАНОВЛЕНО с', targetPeerId);
+      }
     };
 
     // Если мы инициатор - создаем offer
@@ -185,21 +221,30 @@ const WebRTC = {
             type: 'offer',
             targetPeerId: targetPeerId,
             sdp: pc.localDescription,
+            userName: this.userName, // ← ДОБАВИТЬ ЭТУ СТРОКУ
           }),
         );
       } catch (error) {
-        console.error('❌ WebRTC: Ошибка создания offer:', error);
+        console.error('❌ Ошибка создания offer:', error);
       }
     }
-
+    // Сохраняем имя участника, если оно пришло
+    if (message.userName) {
+      UI.updateParticipantStatus(sourcePeerId, { name: message.userName });
+    }
     return pc;
   },
 
   // Обработка offer
   async handleOffer(message) {
     const sourcePeerId = message.sourcePeerId;
+    console.log('📥 ПОЛУЧЕН OFFER от', sourcePeerId);
 
-    if (this.processingOffers[sourcePeerId]) return;
+    // Предотвращаем двойную обработку
+    if (this.processingOffers[sourcePeerId]) {
+      console.log('⏳ Уже обрабатываем offer от', sourcePeerId);
+      return;
+    }
     this.processingOffers[sourcePeerId] = true;
 
     try {
@@ -208,14 +253,27 @@ const WebRTC = {
         pc = await this.createPeerConnection(sourcePeerId, false);
       }
 
+      // Проверяем состояние перед установкой remote description
+      if (pc.signalingState !== 'stable') {
+        console.log('⏳ Текущее signaling state:', pc.signalingState, 'ждем...');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
       await pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
+      console.log('✅ Remote description установлен для', sourcePeerId);
 
       // Применяем отложенные кандидаты
       if (this.pendingCandidates[sourcePeerId]?.length) {
+        console.log(
+          '📦 Применяем отложенные кандидаты:',
+          this.pendingCandidates[sourcePeerId].length,
+        );
         for (const candidate of this.pendingCandidates[sourcePeerId]) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          } catch (e) {}
+          } catch (e) {
+            console.error('Ошибка добавления кандидата:', e);
+          }
         }
         this.pendingCandidates[sourcePeerId] = [];
       }
@@ -230,8 +288,9 @@ const WebRTC = {
           sdp: pc.localDescription,
         }),
       );
+      console.log('📤 Отправлен answer для', sourcePeerId);
     } catch (error) {
-      console.error('❌ WebRTC: Ошибка обработки offer:', error);
+      console.error('❌ Ошибка обработки offer:', error);
     } finally {
       this.processingOffers[sourcePeerId] = false;
     }
@@ -240,23 +299,41 @@ const WebRTC = {
   // Обработка answer
   async handleAnswer(message) {
     const sourcePeerId = message.sourcePeerId;
-    const pc = this.peerConnections[sourcePeerId];
+    console.log('📥 ПОЛУЧЕН ANSWER от', sourcePeerId);
 
-    if (!pc) return;
+    const pc = this.peerConnections[sourcePeerId];
+    if (!pc) {
+      console.log('⚠️ Нет соединения для answer от', sourcePeerId);
+      return;
+    }
 
     try {
-      await pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
+      // Проверяем, что мы в правильном состоянии
+      if (pc.signalingState !== 'have-local-offer') {
+        console.log('⚠️ Неправильное состояние для answer:', pc.signalingState);
+        return;
+      }
 
+      await pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
+      console.log('✅ Remote description установлен для', sourcePeerId);
+
+      // Применяем отложенные кандидаты
       if (this.pendingCandidates[sourcePeerId]?.length) {
+        console.log(
+          '📦 Применяем отложенные кандидаты:',
+          this.pendingCandidates[sourcePeerId].length,
+        );
         for (const candidate of this.pendingCandidates[sourcePeerId]) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          } catch (e) {}
+          } catch (e) {
+            console.error('Ошибка добавления кандидата:', e);
+          }
         }
         this.pendingCandidates[sourcePeerId] = [];
       }
     } catch (error) {
-      console.error('❌ WebRTC: Ошибка обработки answer:', error);
+      console.error('❌ Ошибка обработки answer:', error);
     }
   },
 
@@ -265,15 +342,20 @@ const WebRTC = {
     const sourcePeerId = message.sourcePeerId;
     const pc = this.peerConnections[sourcePeerId];
 
-    if (!pc) return;
+    if (!pc) {
+      console.log('⚠️ Получен кандидат для неизвестного пира:', sourcePeerId);
+      return;
+    }
 
     if (pc.remoteDescription) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+        console.log('❄️ Добавлен ICE кандидат для', sourcePeerId);
       } catch (error) {
-        console.error('❌ WebRTC: Ошибка добавления кандидата:', error);
+        console.error('Ошибка добавления кандидата:', error);
       }
     } else {
+      console.log('⏳ Сохраняем кандидат для', sourcePeerId, '(нет remote description)');
       if (!this.pendingCandidates[sourcePeerId]) {
         this.pendingCandidates[sourcePeerId] = [];
       }
@@ -284,6 +366,8 @@ const WebRTC = {
   // Запуск камеры
   async startCamera() {
     try {
+      console.log('📷 Запрашиваем доступ к камере...');
+
       this.localStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
@@ -300,12 +384,52 @@ const WebRTC = {
       document.getElementById('toggleCam').classList.remove('muted');
 
       console.log('✅ WebRTC: Камера включена');
+
+      // Если мы уже в комнате, нужно добавить треки во все существующие соединения
+      if (this.hasJoinedRoom) {
+        console.log('🔄 Добавляем треки в существующие соединения');
+        Object.keys(this.peerConnections).forEach((peerId) => {
+          const pc = this.peerConnections[peerId];
+          this.localStream.getTracks().forEach((track) => {
+            pc.addTrack(track, this.localStream);
+          });
+
+          // Если мы уже создавали offer, но он не отправился из-за отсутствия треков
+          if (pc.signalingState === 'stable') {
+            this.createOfferForPeer(peerId);
+          }
+        });
+      }
     } catch (error) {
       console.error('❌ WebRTC: Ошибка доступа к камере:', error);
       UI.showPermissionModal();
     }
   },
 
+  // Создать offer для конкретного пира
+  async createOfferForPeer(peerId) {
+    const pc = this.peerConnections[peerId];
+    if (!pc || !this.localStream || !this.isCameraOn) return;
+
+    try {
+      console.log('📤 СОЗДАЕМ OFFER для', peerId);
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      });
+      await pc.setLocalDescription(offer);
+
+      this.socket.send(
+        JSON.stringify({
+          type: 'offer',
+          targetPeerId: peerId,
+          sdp: pc.localDescription,
+        }),
+      );
+    } catch (error) {
+      console.error('❌ Ошибка создания offer:', error);
+    }
+  },
   // Переключение микрофона
   toggleMic() {
     if (!this.localStream) return;
@@ -316,9 +440,25 @@ const WebRTC = {
       this.isMicOn = audioTrack.enabled;
 
       const micBtn = document.getElementById('toggleMic');
-      micBtn.classList.toggle('muted', !this.isMicOn);
+      if (this.isMicOn) {
+        micBtn.classList.remove('muted');
+      } else {
+        micBtn.classList.add('muted');
+      }
 
       UI.updateAudioIndicator('local', !this.isMicOn);
+
+      // Отправляем всем участникам информацию о состоянии микрофона
+      if (this.socket && this.currentRoom) {
+        this.socket.send(
+          JSON.stringify({
+            type: 'mic-state',
+            roomId: this.currentRoom,
+            targetPeerId: 'all',
+            isMuted: !this.isMicOn,
+          }),
+        );
+      }
     }
   },
 
@@ -332,16 +472,28 @@ const WebRTC = {
       this.isCameraOn = videoTrack.enabled;
 
       const camBtn = document.getElementById('toggleCam');
-      camBtn.classList.toggle('muted', !this.isCameraOn);
+      if (this.isCameraOn) {
+        camBtn.classList.remove('muted');
+      } else {
+        camBtn.classList.add('muted');
+      }
 
-      // Показываем/скрываем видео или показываем аватар
+      // Показываем черный экран вместо полного исчезновения
       const localVideo = document.getElementById('video-local');
       if (localVideo) {
-        if (this.isCameraOn) {
-          localVideo.style.display = 'block';
-        } else {
-          localVideo.style.display = 'none';
-          // Показать аватар
+        const videoElement = localVideo.querySelector('video');
+        if (videoElement) {
+          if (this.isCameraOn) {
+            videoElement.style.display = 'block';
+            videoElement.srcObject = this.localStream;
+          } else {
+            // Оставляем видео элемент, но показываем черный экран
+            videoElement.style.display = 'block';
+            // Можно добавить черный overlay или просто видео без потока
+            videoElement.srcObject = null;
+            // Добавляем класс для черного фона
+            localVideo.style.background = '#000';
+          }
         }
       }
     }
@@ -356,13 +508,13 @@ const WebRTC = {
 
       // Заменяем видео трек на трек экрана
       const videoTrack = screenStream.getVideoTracks()[0];
-      const sender = this.peerConnections[Object.keys(this.peerConnections)[0]]
-        .getSenders()
-        .find((s) => s.track.kind === 'video');
 
-      if (sender) {
-        sender.replaceTrack(videoTrack);
-      }
+      Object.values(this.peerConnections).forEach((pc) => {
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+        if (sender) {
+          sender.replaceTrack(videoTrack);
+        }
+      });
 
       this.isScreenSharing = true;
       document.getElementById('shareScreen').classList.add('active');
@@ -380,35 +532,34 @@ const WebRTC = {
   stopScreenSharing() {
     if (this.isScreenSharing && this.localStream) {
       const videoTrack = this.localStream.getVideoTracks()[0];
-      const sender = this.peerConnections[Object.keys(this.peerConnections)[0]]
-        .getSenders()
-        .find((s) => s.track.kind === 'video');
 
-      if (sender) {
-        sender.replaceTrack(videoTrack);
-      }
+      Object.values(this.peerConnections).forEach((pc) => {
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+        if (sender) {
+          sender.replaceTrack(videoTrack);
+        }
+      });
 
       this.isScreenSharing = false;
       document.getElementById('shareScreen').classList.remove('active');
     }
   },
 
-  // Удаление соединения
-  removePeerConnection(peerId) {
-    if (this.peerConnections[peerId]) {
-      this.peerConnections[peerId].close();
-      delete this.peerConnections[peerId];
-    }
-    if (this.pendingCandidates[peerId]) {
-      delete this.pendingCandidates[peerId];
+  // Удалить участника
+  removeParticipant(peerId) {
+    this.participants.delete(peerId);
+    this.updateParticipantsList();
+
+    // Если это был тренер, сбрасываем trainerId
+    if (peerId === this.trainerId) {
+      this.trainerId = null;
     }
   },
-
   // Завершение звонка
   hangup() {
     // Закрываем все соединения
     Object.keys(this.peerConnections).forEach((peerId) => {
-      this.removePeerConnection(peerId);
+      this.removePeerConnection(peerId); // ← Здесь this.removePeerConnection существует
     });
 
     // Останавливаем локальный поток
@@ -425,6 +576,7 @@ const WebRTC = {
     this.isMicOn = false;
     this.isScreenSharing = false;
     this.currentRoom = null;
+    this.hasJoinedRoom = false;
 
     // Очищаем UI
     document.getElementById('videoArea').innerHTML = '';

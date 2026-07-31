@@ -6,6 +6,7 @@ from typing import Dict, Set, Optional, List
 from datetime import datetime
 import asyncio
 from pydantic import BaseModel
+import os
 
 app = FastAPI(
     title="SkillSync API",
@@ -366,7 +367,40 @@ async def reset_data():
     trainings_db.clear()
     results_db.clear()
     return {"message": "All data reset"}
+# ============= УПРАВЛЕНИЕ MEDIAPIPE POSE =============
 
+from exe_launcher import launcher
+
+class MediaPipeControl:
+    def __init__(self):
+        self.is_running = False
+
+mediapipe_control = MediaPipeControl()
+
+@app.post("/mediapipe/start")
+async def start_mediapipe():
+    """Запустить MediaPipe Pose"""
+    result = launcher.start()
+    if result["status"] == "started":
+        mediapipe_control.is_running = True
+    return result
+
+@app.post("/mediapipe/stop")
+async def stop_mediapipe():
+    """Остановить MediaPipe Pose"""
+    result = launcher.stop()
+    if result["status"] == "stopped":
+        mediapipe_control.is_running = False
+    return result
+
+@app.get("/mediapipe/status")
+async def mediapipe_status():
+    """Проверить статус MediaPipe Pose"""
+    return {
+        "is_running": mediapipe_control.is_running,
+        "exe_path": launcher.exe_path,
+        "exe_exists": os.path.exists(launcher.exe_path)
+    }
 # ============= ЗАПУСК =============
 
 if __name__ == "__main__":

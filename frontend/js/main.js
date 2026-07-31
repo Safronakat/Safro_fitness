@@ -1,4 +1,13 @@
 // ========== ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ ==========
+async function checkMediaPipeStatus() {
+  try {
+    const response = await fetch('http://localhost:8080/mediapipe/status');
+    const status = await response.json();
+    console.log('MediaPipe статус:', status);
+  } catch (error) {
+    console.log('MediaPipe сервер не доступен');
+  }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('🚀 Safro Fitness инициализирован');
@@ -17,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (savedName) {
     document.getElementById('userName').value = savedName;
   }
+  checkMediaPipeStatus();
 });
 
 // Обработка ошибок
